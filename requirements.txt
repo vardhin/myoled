@@ -1,0 +1,6 @@
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pillow==10.0.1
+psutil==5.9.6
+adafruit-circuitpython-ssd1306==2.12.12
+adafruit-blinka==8.22.2
