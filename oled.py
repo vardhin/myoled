@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import Optional
 import json
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse
@@ -17,14 +18,13 @@ import uvicorn
 try:
     import board
     import digitalio
+    import busio
     import adafruit_ssd1306
     from PIL import Image, ImageDraw, ImageFont
     DISPLAY_AVAILABLE = True
 except ImportError:
     print("Display libraries not available. Running in simulation mode.")
     DISPLAY_AVAILABLE = False
-
-app = FastAPI(title="Raspberry Pi OLED Display Controller", version="1.0.0")
 
 # Global variables
 display = None
@@ -44,17 +44,51 @@ class OLEDController:
         self.initialize_display()
     
     def initialize_display(self):
-        """Initialize the OLED display"""
+        """Initialize the OLED display via SPI"""
         if not DISPLAY_AVAILABLE:
             print("Running in simulation mode - no actual display")
             return
         
         try:
-            # Initialize I2C
-            i2c = board.I2C()  # Uses board's I2C pins automatically
+            # Initialize SPI
+            spi = busio.SPI(board.SCK, MOSI=board.MOSI)
             
-            # Initialize display (0x3C is common address for SSD1306)
-            self.display = adafruit_ssd1306.SSD1306_I2C(DISPLAY_WIDTH, DISPLAY_HEIGHT, i2c, addr=0x3C)
+            # Reset pin (optional, can be None)
+            reset_pin = None
+            
+            # DC pin - you might need to connect this to another GPIO
+            # For now, trying without DC pin (some displays don't need it)
+            dc_pin = None
+            cs_pin = None  # Chip select (optional)
+            
+            try:
+                # Try SPI initialization
+                self.display = adafruit_ssd1306.SSD1306_SPI(
+                    DISPLAY_WIDTH, DISPLAY_HEIGHT, spi, dc_pin, reset_pin, cs_pin
+                )
+                print("SPI OLED display initialized successfully!")
+            except Exception as spi_error:
+                print(f"SPI initialization failed: {spi_error}")
+                
+                # Fallback: Try I2C with different addresses
+                print("Trying I2C as fallback...")
+                i2c = board.I2C()
+                
+                # Try common I2C addresses
+                for addr in [0x3C, 0x3D, 0x78, 0x7A]:
+                    try:
+                        print(f"Trying I2C address: 0x{addr:02X}")
+                        self.display = adafruit_ssd1306.SSD1306_I2C(
+                            DISPLAY_WIDTH, DISPLAY_HEIGHT, i2c, addr=addr
+                        )
+                        print(f"I2C OLED display initialized at address 0x{addr:02X}!")
+                        break
+                    except Exception as i2c_error:
+                        print(f"I2C address 0x{addr:02X} failed: {i2c_error}")
+                        continue
+                
+                if not self.display:
+                    raise Exception("Both SPI and I2C initialization failed")
             
             # Clear display
             self.display.fill(0)
@@ -70,7 +104,7 @@ class OLEDController:
                 self.font = ImageFont.load_default()
                 self.small_font = ImageFont.load_default()
             
-            print("OLED display initialized successfully!")
+            print("OLED display ready!")
             
         except Exception as e:
             print(f"Error initializing display: {e}")
@@ -232,19 +266,23 @@ async def display_loop():
             print(f"Error in display loop: {e}")
             await asyncio.sleep(1)
 
-@app.on_event("startup")
-async def startup_event():
-    """Start the display loop when the app starts"""
+# Updated lifespan event handler (replaces deprecated on_event)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     global display_task
     display_task = asyncio.create_task(display_loop())
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up when the app shuts down"""
-    global display_task
+    yield
+    # Shutdown
     if display_task:
         display_task.cancel()
     oled.clear_display()
+
+app = FastAPI(
+    title="Raspberry Pi OLED Display Controller", 
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
@@ -266,7 +304,7 @@ async def root():
         <h1>🖥️ OLED Display Controller</h1>
         <div class="status">
             <p><strong>Current Mode:</strong> <span id="currentMode">clock</span></p>
-            <p><strong>Display:</strong> """ + ("Connected" if DISPLAY_AVAILABLE else "Simulation Mode") + """</p>
+            <p><strong>Display:</strong> """ + ("Connected" if oled.display else "Not Connected") + """</p>
         </div>
         
         <h2>Display Modes</h2>
@@ -319,7 +357,7 @@ async def get_status():
     return {
         "mode": current_mode,
         "message": custom_message if current_mode == "message" else "",
-        "display_available": DISPLAY_AVAILABLE,
+        "display_available": oled.display is not None,
         "timestamp": datetime.now().isoformat()
     }
 

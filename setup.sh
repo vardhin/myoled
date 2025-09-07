@@ -1,66 +1,45 @@
 #!/bin/bash
+# filepath: /home/vardhin/Documents/git/myoled/setup_spi.sh
+echo "🚀 Setting up OLED Display with SPI..."
 
-# Setup script for OLED Display FastAPI Server on Raspberry Pi 3B+
+# Enable SPI interface
+echo "📡 Enabling SPI interface..."
+sudo raspi-config nonint do_spi 0
 
-echo "🚀 Setting up OLED Display FastAPI Server..."
-
-# Update system packages
-echo "📦 Updating system packages..."
-sudo apt update && sudo apt upgrade -y
-
-# Install system dependencies
-echo "🔧 Installing system dependencies..."
-sudo apt install -y python3-pip python3-venv i2c-tools python3-dev libjpeg-dev zlib1g-dev libfreetype6-dev liblcms2-dev
-
-# Enable I2C interface
-echo "🔌 Enabling I2C interface..."
+# Also enable I2C as fallback
+echo "📡 Enabling I2C interface as fallback..."
 sudo raspi-config nonint do_i2c 0
 
-# Create virtual environment
-echo "🐍 Creating Python virtual environment..."
-python3 -m venv venv
-source venv/bin/activate
+# Update system
+echo "📦 Updating system..."
+sudo apt update
 
-# Install Python packages
-echo "📚 Installing Python packages..."
+# Install required system packages
+echo "📦 Installing system packages..."
+sudo apt install -y python3-pip python3-venv python3-dev i2c-tools
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "venv" ]; then
+    echo "🐍 Creating Python virtual environment..."
+    python3 -m venv venv
+fi
+
+# Activate virtual environment and install packages
+echo "📦 Installing Python packages..."
+source venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# Create systemd service file
-echo "⚙️ Creating systemd service..."
-sudo tee /etc/systemd/system/oled-display.service > /dev/null << EOF
-[Unit]
-Description=OLED Display FastAPI Server
-After=network.target
-
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/oled-display
-Environment=PATH=/home/pi/oled-display/venv/bin
-ExecStart=/home/pi/oled-display/venv/bin/python oled.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Set permissions
-chmod +x oled.py
-
 echo "✅ Setup complete!"
 echo ""
-echo "📋 Next steps:"
-echo "1. Connect your OLED display with these pin connections:"
-echo "   • VCC  → Pin 1  (3.3V)"
-echo "   • GND  → Pin 6  (Ground)"
-echo "   • SCL  → Pin 5  (GPIO 3 / SCL)"
-echo "   • SDA  → Pin 3  (GPIO 2 / SDA)"
+echo "🔌 Wire your OLED display:"
+echo "   VCC -> Pin 1  (3.3V)"
+echo "   GND -> Pin 6  (Ground)"
+echo "   SCK -> Pin 23 (GPIO 11 - SPI Clock)"
+echo "   SDA -> Pin 19 (GPIO 10 - SPI MOSI)"
 echo ""
-echo "2. Test I2C connection: i2cdetect -y 1"
-echo "3. Run the server: source venv/bin/activate && python oled.py"
-echo "4. Access web interface at: http://your-pi-ip:8000"
+echo "🔄 Please reboot your Pi to enable SPI:"
+echo "   sudo reboot"
 echo ""
-echo "🔄 To enable auto-start on boot:"
-echo "   sudo systemctl enable oled-display.service"
-echo "   sudo systemctl start oled-display.service"
+echo "🧪 After reboot, test with:"
+echo "   source venv/bin/activate && python oled.py"
